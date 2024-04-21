@@ -1,0 +1,56 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  session_id    Int             @id @default(autoincrement())
+  created_at    DateTime        @default(now())
+  updated_at    DateTime        @default(now()) @updatedAt
+  BookingDetail BookingDetail[]
+}
+
+model Tag {
+  tag_id   Int       @id @default(autoincrement())
+  tag_name String    @unique
+  Rooms    RoomTag[]
+}
+
+model Room {
+  room_id          Int             @id @default(autoincrement())
+  room_name        String
+  room_description String
+  room_capacity    Int
+  Tags             RoomTag[]
+  BookingDetail    BookingDetail[]
+}
+
+model RoomTag {
+  room_tag_id Int      @id @default(autoincrement())
+  room_id     Int
+  tag_id      Int
+  created_at  DateTime @default(now())
+  room_ref    Room     @relation(fields: [room_id], references: [room_id], onDelete: Cascade, onUpdate: Cascade)
+  tag_ref     Tag      @relation(fields: [tag_id], references: [tag_id], onDelete: Cascade, onUpdate: Cascade)
+}
+
+model BookingDetail {
+  booking_detail_id Int      @id @default(autoincrement())
+  session_id        Int
+  room_id           Int
+  booking_date      DateTime
+  booking_time_slot String
+  created_at        DateTime @default(now())
+  room_ref          Room     @relation(fields: [room_id], references: [room_id], onDelete: Cascade, onUpdate: Cascade)
+  session_ref       Session  @relation(fields: [session_id], references: [session_id], onDelete: Cascade, onUpdate: Cascade)
+}
