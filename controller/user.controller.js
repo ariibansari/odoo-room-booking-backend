@@ -21,8 +21,6 @@ exports.getRooms = async (req, res) => {
             }
         })
 
-        console.log(rooms[4].Tags);
-
         return res.json(rooms)
     }
     catch (e) {
@@ -44,6 +42,7 @@ exports.getRoomDetails = async (req, res) => {
             include: {
                 BookingDetail: {
                     select: {
+                        booking_detail_id: true,
                         session_id: true,
                         room_id: true,
                         booking_date: true,
@@ -81,6 +80,7 @@ exports.getRoomAvailability = async (req, res) => {
 // @route - POST - /api/user/room/book
 // @use - Books a room
 exports.bookRoom = async (req, res) => {
+    const { emitMessageToClient } = require("../socket");
     let { session_id, room_id, selectedDate, selectedTimeRange } = req.body
 
     try {
@@ -97,7 +97,36 @@ exports.bookRoom = async (req, res) => {
             }
         })
 
+        emitMessageToClient(null, "room_booked", new_booking_detail)
         return res.json({ new_booking_detail })
+    }
+    catch (e) {
+        console.log(e);
+        return res.status(500).json({ error: "Internal server error" })
+    }
+}
+
+
+// @route - POST - /api/user/room/unbook
+// @use - Unbooks a room
+exports.unbookRoom = async (req, res) => {
+    const { emitMessageToClient } = require("../socket");
+    let { session_id, booking_detail_id } = req.body
+
+    try {
+        if (!session_id || !booking_detail_id) {
+            return res.status(400).json({ error: `Missing required fields: [session_id, booking_detail_id]` })
+        }
+
+        await prisma.bookingDetail.delete({
+            where: {
+                session_id: session_id,
+                booking_detail_id: booking_detail_id
+            }
+        })
+
+        emitMessageToClient(null, "room_unbooked", { deleted_booking_detail_id: booking_detail_id, session_id: session_id })
+        return res.json({ deleted_booking_detail_id: booking_detail_id })
     }
     catch (e) {
         console.log(e);

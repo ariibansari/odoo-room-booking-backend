@@ -14,4 +14,4 @@ const corsOptions = {
     optionSuccessStatus: 200
 }
 
-module.exports = corsOptions
+module.exports = { corsOptions, allowedOrigins }
