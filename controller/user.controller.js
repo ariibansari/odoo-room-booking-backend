@@ -2,10 +2,55 @@ const { prisma } = require("../config/prismaClient");
 const moment = require('moment-timezone')
 
 
+// @route - POST - /api/user/tags
+// @use - Gets all tags
+exports.getTags = async (req, res) => {
+    try {
+        let { selectedTags = [] } = req.body
+
+        const tag = await prisma.tag.findMany({
+            where: {
+                tag_id: {
+                    notIn: selectedTags.map(tag => tag.tag_id)
+                }
+            }
+        })
+        return res.json(tag)
+    }
+    catch (e) {
+        console.log(e);
+        return res.status(500).json({ error: "Internal server error" })
+    }
+}
+
+
 // @route - POST - /api/user/room/all
 // @use - Gets room with query and filter
 exports.getRooms = async (req, res) => {
+    let { searchedText = '', selectedTags = [], sortBy } = req.body
     try {
+        let orderBy = {}
+        if (sortBy === "capacity-high-to-low") {
+            orderBy = {
+                room_capacity: "desc"
+            }
+        }
+        else if (sortBy === "capacity-low-to-high") {
+            orderBy = {
+                room_capacity: "asc"
+            }
+        }
+
+        if (selectedTags.length === 0) {
+            const tags = await prisma.tag.findMany({
+                select: {
+                    tag_id: true
+                }
+            })
+
+            selectedTags = tags
+        }
+
         const rooms = await prisma.room.findMany({
             include: {
                 Tags: {
@@ -18,7 +63,21 @@ exports.getRooms = async (req, res) => {
                         }
                     }
                 }
-            }
+            },
+            where: {
+                room_name: {
+                    contains: searchedText,
+                    mode: "insensitive"
+                },
+                Tags: {
+                    some: {
+                        tag_id: {
+                            in: selectedTags.map(tag => tag.tag_id)
+                        }
+                    }
+                }
+            },
+            orderBy: orderBy
         })
 
         return res.json(rooms)
@@ -65,14 +124,13 @@ exports.getRoomDetails = async (req, res) => {
 // @use - Gets room availability
 exports.getRoomAvailability = async (req, res) => {
     let { room_id } = req.params;
-    let { session_id } = req.body; // Assuming session_id is passed in the body
     room_id = parseInt(room_id);
 
     try {
         const today = new Date();
 
-        let startTime = new Date(today.setUTCHours(0, 0, 0, 0));
-        let endTime = new Date(today.setUTCHours(23, 59, 59, 999));
+        let startTime = new Date(new Date().setUTCHours(0, 0, 0, 0));
+        let endTime = new Date(new Date().setUTCHours(23, 59, 59, 999));
 
         const existingBookings = await prisma.bookingDetail.findMany({
             where: {
@@ -80,17 +138,13 @@ exports.getRoomAvailability = async (req, res) => {
                 booking_date: {
                     gte: startTime,
                     lte: endTime
-                },
-                // booking_time_slot: {
-                //     gte: startTime.toISOString().slice(11, 16), // Compare time part only
-                //     lte: endTime.toISOString().slice(11, 16),
-                // },
+                }
             },
             orderBy: {
                 booking_time_slot: 'asc',
             },
         });
-        console.log(existingBookings);
+        // console.log(existingBookings);
 
         if (existingBookings.length === 0) {
             return res.json({ status: 'Available all day', color: 'green' }); // No bookings
@@ -133,7 +187,25 @@ exports.getRoomAvailability = async (req, res) => {
         nextBookingTime.setMonth(today.getMonth())
         nextBookingTime.setFullYear(today.getUTCFullYear())
         nextBookingTime.setHours(parseInt(nextAvailableTimeslot.substring(0, 2)), parseInt(nextAvailableTimeslot.substring(3, 5)), 0, 0)
-        return res.json({ status: `Available after ${moment(nextBookingTime).fromNow(true)}`, color: 'orange' });
+
+        const next_booking_time = moment(nextBookingTime);
+        const now = moment();
+
+        const duration = moment.duration(next_booking_time.diff(now));
+        const hours = duration.hours();
+        const minutes = duration.minutes();
+
+        if (hours <= 0 && minutes <= 0) { // available now
+            return res.json({ status: `Available now`, color: 'green' });
+        }
+
+        const timeDifference =
+            `${hours > 0 ? `${hours} hr${hours !== 1 ? 's' : ''} ` : ''}` +
+            `${minutes > 0 ? `${minutes} min${minutes !== 1 ? 's' : ''}` : (hours === 0 ? '1 min' : '')}`;
+
+
+        return res.json({ status: `Available after ${timeDifference}`, color: 'orange', avaialbleAfter: nextBookingTime });
+        // return res.json({ status: `Available after ${moment(nextBookingTime).fromNow(true)}`, color: 'orange' });
 
     } catch (error) {
         console.error(error);
