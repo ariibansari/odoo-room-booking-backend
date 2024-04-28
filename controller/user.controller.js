@@ -28,6 +28,7 @@ exports.getTags = async (req, res) => {
 // @use - Gets room with query and filter
 exports.getRooms = async (req, res) => {
     let { searchedText = '', selectedTags = [], sortBy } = req.body
+    console.log({ searchedText, selectedTags, sortBy });
     try {
         let orderBy = {}
         if (sortBy === "capacity-high-to-low") {
@@ -80,6 +81,20 @@ exports.getRooms = async (req, res) => {
             orderBy: orderBy
         })
 
+        let i = 0
+        for (let room of rooms) {
+            const availabilityData = await getRoomAvailabilityData(room.room_id, res)
+            rooms[i].availabilityScore = availabilityData.availabilityScore
+            i++
+        }
+
+        if (sortBy === "availability-high-to-low") {
+            rooms.sort((a, b) => b.availabilityScore - a.availabilityScore)
+        }
+        else if (sortBy === "availability-low-to-high") {
+            rooms.sort((a, b) => a.availabilityScore - b.availabilityScore)
+        }
+
         return res.json(rooms)
     }
     catch (e) {
@@ -127,34 +142,22 @@ exports.getRoomAvailability = async (req, res) => {
     room_id = parseInt(room_id);
 
     try {
+        const availabilityData = await getRoomAvailabilityData(room_id, res)
+        return res.json(availabilityData)
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+
+// helper function that returns that availability data for the selected room
+const getRoomAvailabilityData = async (room_id, res) => {
+    try {
         const today = new Date();
 
-        let startTime = new Date(new Date().setUTCHours(0, 0, 0, 0));
-        let endTime = new Date(new Date().setUTCHours(23, 59, 59, 999));
-
-        const existingBookings = await prisma.bookingDetail.findMany({
-            where: {
-                room_id,
-                booking_date: {
-                    gte: startTime,
-                    lte: endTime
-                }
-            },
-            orderBy: {
-                booking_time_slot: 'asc',
-            },
-        });
-        // console.log(existingBookings);
-
-        if (existingBookings.length === 0) {
-            return res.json({ status: 'Available all day', color: 'green' }); // No bookings
-        }
-
-        const totalPossibleSlots = 16; // 10:00 AM to 7:00 PM with 30-minute including intervals and 1PM to 2PM break
-        if (existingBookings.length === totalPossibleSlots) {
-            return res.json({ status: 'Full for the day', color: 'red' }); // All slots booked
-        }
-
+        let startTime = new Date(new Date().setHours(0, 0, 0, 0));
+        let endTime = new Date(new Date().setHours(23, 59, 59, 999));
         const time_slots = [
             { time_range: "10:00 - 10:30" },
             { time_range: "10:30 - 11:00" },
@@ -174,11 +177,41 @@ exports.getRoomAvailability = async (req, res) => {
             { time_range: "18:30 - 19:00" },
         ]
 
+        const existingBookings = await prisma.bookingDetail.findMany({
+            where: {
+                room_id,
+                booking_date: {
+                    gte: startTime,
+                    lte: endTime
+                }
+            },
+            orderBy: {
+                booking_time_slot: 'asc',
+            },
+        });
+
+
+        if (existingBookings.length === 0) {
+            return { status: 'Available all day', color: 'green', availabilityScore: 0 }; // No bookings
+        }
+
+        const totalPossibleSlots = 16; // 10:00 AM to 7:00 PM with 30-minute including intervals and 1PM to 2PM break
+        if (existingBookings.length === totalPossibleSlots) {
+            return { status: 'Full for the day', color: 'red', availabilityScore: Infinity }; // All slots booked
+        }
+
+
         let nextAvailableTimeslot = ""
         for (let time_slot of time_slots) {
-            if (existingBookings.findIndex(booking => booking.booking_time_slot === time_slot.time_range) === -1) {
-                nextAvailableTimeslot = time_slot.time_range
-                break
+            const [startHour, startMinute] = time_slot.time_range.substring(0, 5).split(":"); // Get start time of the slot
+            const slotStartTime = new Date();
+            slotStartTime.setHours(startHour, startMinute, 0, 0);
+
+            if (slotStartTime > today) { // Check if the slot's start time is in the future
+                if (existingBookings.findIndex(booking => booking.booking_time_slot === time_slot.time_range) === -1) {
+                    nextAvailableTimeslot = time_slot.time_range;
+                    break; // Found the next available slot
+                }
             }
         }
 
@@ -196,7 +229,7 @@ exports.getRoomAvailability = async (req, res) => {
         const minutes = duration.minutes();
 
         if (hours <= 0 && minutes <= 0) { // available now
-            return res.json({ status: `Available now`, color: 'green' });
+            return { status: `Available now`, color: 'green', availabilityScore: 1 };
         }
 
         const timeDifference =
@@ -204,14 +237,31 @@ exports.getRoomAvailability = async (req, res) => {
             `${minutes > 0 ? `${minutes} min${minutes !== 1 ? 's' : ''}` : (hours === 0 ? '1 min' : '')}`;
 
 
-        return res.json({ status: `Available after ${timeDifference}`, color: 'orange', avaialbleAfter: nextBookingTime });
-        // return res.json({ status: `Available after ${moment(nextBookingTime).fromNow(true)}`, color: 'orange' });
 
-    } catch (error) {
-        console.error(error);
+        let color = "#222"
+        if (nextBookingTime.getTime() - new Date().getTime() <= 3600000) {
+            // if available within 1 hour
+            color = "green"
+        }
+        else if (nextBookingTime.getTime() - new Date().getTime() > 3600000 && nextBookingTime.getTime() - new Date().getTime() < 10800000) {
+            // if available after 1 hour to next 3 hour
+            // yellowish
+            color = "#d9b706"
+        }
+        else {
+            // available after 3 hours
+            //orangish
+            color = "#e18610"
+        }
+
+
+        return { status: `Available in ${timeDifference}`, color, availabilityScore: nextBookingTime.getTime() };
+    }
+    catch (err) {
+        console.error(err);
         return res.status(500).json({ error: 'Internal server error' });
     }
-};
+}
 
 
 // @route - POST - /api/user/room/book

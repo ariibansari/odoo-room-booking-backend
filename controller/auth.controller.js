@@ -1,5 +1,4 @@
 const { prisma } = require("../config/prismaClient")
-const { generateAccessToken } = require("../util/helper")
 
 
 // @route - POST - /api/auth/session/new
