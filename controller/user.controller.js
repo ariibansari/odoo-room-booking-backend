@@ -203,16 +203,24 @@ const getRoomAvailabilityData = async (room_id, res) => {
 
         let nextAvailableTimeslot = ""
         for (let time_slot of time_slots) {
-            const [startHour, startMinute] = time_slot.time_range.substring(0, 5).split(":"); // Get start time of the slot
+            const [startHour, startMinute] = time_slot.time_range.substring(0, 5).split(":");
             const slotStartTime = new Date();
             slotStartTime.setHours(startHour, startMinute, 0, 0);
 
-            if (slotStartTime > today) { // Check if the slot's start time is in the future
+            const [endHour, endMinute] = time_slot.time_range.substring(8, 13).split(":"); // Get end time
+            const slotEndTime = new Date();
+            slotEndTime.setHours(endHour, endMinute, 0, 0);
+
+            if (slotEndTime > today) { // Check if the slot's end time is in the future
                 if (existingBookings.findIndex(booking => booking.booking_time_slot === time_slot.time_range) === -1) {
                     nextAvailableTimeslot = time_slot.time_range;
-                    break; // Found the next available slot
+                    break;
                 }
             }
+        }
+
+        if (!nextAvailableTimeslot) {
+            return { status: 'Full for the day', color: 'red', availabilityScore: Infinity }; // All slots booked
         }
 
         const nextBookingTime = new Date();
@@ -235,6 +243,8 @@ const getRoomAvailabilityData = async (room_id, res) => {
         const timeDifference =
             `${hours > 0 ? `${hours} hr${hours !== 1 ? 's' : ''} ` : ''}` +
             `${minutes > 0 ? `${minutes} min${minutes !== 1 ? 's' : ''}` : (hours === 0 ? '1 min' : '')}`;
+
+
 
 
 
@@ -269,7 +279,7 @@ const getRoomAvailabilityData = async (room_id, res) => {
 exports.bookRoom = async (req, res) => {
     const { emitMessageToClient } = require("../socket");
     let { session_id, room_id, selectedDate, selectedTimeRange } = req.body
-
+    console.log(session_id);
     try {
         if (!session_id || !room_id || !selectedDate || !selectedTimeRange) {
             return res.status(400).json({ error: `Missing required fields: [session_id, room_id, selectedDate, selectedTimeRange]` })
@@ -277,7 +287,7 @@ exports.bookRoom = async (req, res) => {
 
         const new_booking_detail = await prisma.bookingDetail.create({
             data: {
-                session_id: parseInt(session_id),
+                session_id: session_id,
                 room_id,
                 booking_date: selectedDate,
                 booking_time_slot: selectedTimeRange
